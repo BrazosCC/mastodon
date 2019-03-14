@@ -4,25 +4,36 @@ class Settings::FollowerDomainsController < Settings::BaseController
   layout 'admin'
 
   before_action :authenticate_user!
+  before_action :set_followers, only: :show
 
   def show
-    @account = current_account
-    @domains = current_account.followers.reorder(Arel.sql('MIN(follows.id) DESC')).group('accounts.domain').select('accounts.domain, count(accounts.id) as accounts_from_domain').page(params[:page]).per(10)
+    @form = Form::AccountBatch.new
   end
 
   def update
-    domains = bulk_params[:select] || []
-
-    AfterAccountDomainBlockWorker.push_bulk(domains) do |domain|
-      [current_account.id, domain]
-    end
-
-    redirect_to settings_follower_domains_path, notice: I18n.t('followers.success', count: domains.size)
+    @form = Form::AccountBatch.new(form_account_batch_params.merge(current_account: current_account, action: action_from_button))
+    @form.save
+  rescue ActionController::ParameterMissing
+    # Do nothing
+  ensure
+    redirect_to settings_follower_domains_path(current_params)
   end
 
   private
 
-  def bulk_params
-    params.permit(select: [])
+  def set_followers
+    @followers = current_account.followers.includes(:account_stat).page(params[:page]).per(40)
+  end
+
+  def form_account_batch_params
+    params.require(:form_account_batch_params).permit(:action, account_ids: [])
+  end
+
+  def current_params
+    { page: (params[:page] || 1).to_i }
+  end
+
+  def action_from_button
+    'remove_from_followers' if params[:delete]
   end
 end
